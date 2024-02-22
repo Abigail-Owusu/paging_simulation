@@ -85,7 +85,18 @@ void allocatePage(int virtual_page_number)
 }
 
 int translateAddress(int virtualAddress){
-    return 0;
+    //Calculating the page number by dividing the address by the page size.
+    int virtual_page_number = virtualAddress / PAGE_SIZE;
+
+
+    //Checking if a frame is present or occupied in physical memory
+    if (PAGE_TABLE[virtual_page_number].valid){
+        int frame_number = PAGE_TABLE[virtual_page_number].frame_number;
+        int offset = virtualAddress % PAGE_SIZE;
+        int physical_address = frame_number *  PAGE_SIZE * 
+
+
+    }
 }
 
 int main()
