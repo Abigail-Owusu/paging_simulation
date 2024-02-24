@@ -4,7 +4,6 @@
 #include <time.h>
 #include <limits.h>
 
-
 #define VIRTUAL_MEMORY_SIZE 1024
 #define PHYSICAL_MEMORY_SIZE 256
 #define PAGE_SIZE 4
@@ -29,7 +28,6 @@ typedef struct
 } Frame;
 
 unsigned char virtual_memory[VIRTUAL_MEMORY_SIZE];
-unsigned char virtual_storage[VIRTUAL_MEMORY_SIZE];
 unsigned char physical_memory[PHYSICAL_MEMORY_SIZE];
 PageTableEntry *page_table[PAGE_TABLE_SIZE];
 Frame *frames;
@@ -48,7 +46,8 @@ void handlePageReplacement(int virtual_page_number);
 void simulateMemoryAccess();
 void displayMemoryStatistics();
 void freeMemory();
-
+void printPhysicalMemory();
+void displayVirtualMemory();
 
 void initializeMemorySystem()
 {
@@ -67,7 +66,6 @@ void initializeMemorySystem()
     for (int i = 0; i < VIRTUAL_MEMORY_SIZE; ++i)
     {
         virtual_memory[i] = rand() % 256;
-        virtual_storage[i] = virtual_memory[i];
     }
 
     srand(time(NULL));
@@ -91,6 +89,7 @@ bool frameExists(FrameNode *frames, int virtual_page_number)
     }
     return false;
 }
+
 int translateAddress(int virtual_address)
 {
     int virtual_page_number = virtual_address / PAGE_SIZE;
@@ -125,20 +124,35 @@ void allocatePage(int virtual_page_number)
 {
     int hash = calculateHash(virtual_page_number);
     PageTableEntry *entry = page_table[hash];
+
+    // Check if the page is already in physical memory
     while (entry != NULL)
     {
-        if (entry->valid && frameExists(entry->frames, virtual_page_number))
+        if (entry->valid)
         {
-            return;
+            FrameNode *current_frame = entry->frames;
+            while (current_frame != NULL)
+            {
+                if (current_frame->frame_number == virtual_page_number)
+                {
+                    // Page is already in physical memory
+                    return;
+                }
+                current_frame = current_frame->next;
+            }
         }
         entry = entry->next;
     }
 
+    // Find a free frame in physical memory
     for (int i = 0; i < num_frames; ++i)
     {
         if (!frames[i].allocated)
         {
+            // Allocate the frame
             frames[i].allocated = true;
+
+            // Create a new frame node
             FrameNode *new_frame = (FrameNode *)malloc(sizeof(FrameNode));
             if (new_frame == NULL)
             {
@@ -147,6 +161,8 @@ void allocatePage(int virtual_page_number)
             }
             new_frame->frame_number = virtual_page_number;
             new_frame->next = NULL;
+
+            // Create a new page table entry
             PageTableEntry *new_entry = (PageTableEntry *)malloc(sizeof(PageTableEntry));
             if (new_entry == NULL)
             {
@@ -155,12 +171,16 @@ void allocatePage(int virtual_page_number)
             }
             new_entry->frames = new_frame;
             new_entry->valid = true;
+
+            // Insert the new entry into the hash table
             new_entry->next = page_table[hash];
             page_table[hash] = new_entry;
+
             return;
         }
     }
 
+    // If no free frames are available, handle page replacement
     handlePageReplacement(virtual_page_number);
 }
 
@@ -205,12 +225,22 @@ void deallocatePage(int virtual_page_number)
     }
 }
 
+void printPhysicalMemory()
+{
+    printf("Physical Memory:\n");
+    for (int i = 0; i < PHYSICAL_MEMORY_SIZE; ++i)
+    {
+        printf("%d ", physical_memory[i]);
+    }
+    printf("\n");
+}
+
 void handlePageFault(int virtual_page_number)
 {
     printf("Page fault! Fetching page %d from secondary storage.\n", virtual_page_number);
     for (int i = 0; i < PAGE_SIZE; ++i)
     {
-        virtual_memory[virtual_page_number * PAGE_SIZE + i] = virtual_storage[virtual_page_number * PAGE_SIZE + i];
+        physical_memory[virtual_page_number * PAGE_SIZE + i] = virtual_memory[virtual_page_number * PAGE_SIZE + i];
     }
     allocatePage(virtual_page_number);
 }
@@ -218,8 +248,10 @@ void handlePageFault(int virtual_page_number)
 void handlePageReplacement(int virtual_page_number)
 {
     PageTableEntry *oldest_entry = NULL;
-    int hash, oldest_frame_number = INT_MAX;
+    int hash;
+    int oldest_frame_number = INT_MAX; // Initialize with a large value
 
+    // Traverse the page table to find the oldest page
     for (int i = 0; i < PAGE_TABLE_SIZE; ++i)
     {
         PageTableEntry *entry = page_table[i];
@@ -229,7 +261,7 @@ void handlePageReplacement(int virtual_page_number)
             {
                 oldest_frame_number = entry->frames->frame_number;
                 oldest_entry = entry;
-                hash = i;
+                hash = i; // Store the hash of the oldest entry
             }
             entry = entry->next;
         }
@@ -237,7 +269,10 @@ void handlePageReplacement(int virtual_page_number)
 
     if (oldest_entry != NULL)
     {
+        // Deallocate the oldest page
         deallocatePage(oldest_entry->frames->frame_number);
+
+        // Allocate the new page in physical memory
         allocatePage(virtual_page_number);
     }
 }
@@ -287,6 +322,17 @@ void freeMemory()
     free(frames);
 }
 
+//display content in virtual memory
+void displayVirtualMemory()
+{
+    printf("Virtual Memory:\n");
+    for (int i = 0; i < VIRTUAL_MEMORY_SIZE; ++i)
+    {
+        printf("%d ", virtual_memory[i]);
+    }
+    printf("\n");
+}
+
 int main()
 {
     initializeMemorySystem();
@@ -296,6 +342,9 @@ int main()
     {
         simulateMemoryAccess();
     }
+    displayVirtualMemory();
+
+    printPhysicalMemory();
 
     // Display memory statistics
     displayMemoryStatistics();
