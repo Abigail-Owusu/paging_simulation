@@ -3,11 +3,13 @@
 #include <stdbool.h>
 #include <time.h>
 #include <limits.h>
+#include <stdbool.h>
 
 #define VIRTUAL_MEMORY_SIZE 1024
 #define PHYSICAL_MEMORY_SIZE 256
 #define PAGE_SIZE 4
 #define PAGE_TABLE_SIZE 1024
+
 
 typedef struct FrameNode
 {
@@ -30,11 +32,98 @@ typedef struct
 unsigned char virtual_memory[VIRTUAL_MEMORY_SIZE];
 unsigned char physical_memory[PHYSICAL_MEMORY_SIZE];
 PageTableEntry *page_table[PAGE_TABLE_SIZE];
-Frame *frames;
+
+
+Queue *fifo_queue;
 int num_frames;
 int fifo_queue_size = 0;
 int page_faults = 0;
 int hits = 0;
+
+// Define the node structure for the queue
+typedef struct QueueNode
+{
+    int frame_number;
+    struct QueueNode *next;
+} QueueNode;
+
+// Define the queue structure
+typedef struct
+{
+    QueueNode *front;
+    QueueNode *rear;
+    int size;
+} Queue;
+
+// Function to initialize an empty queue
+Queue *createQueue()
+{
+    Queue *queue = (Queue *)malloc(sizeof(Queue));
+    if (queue == NULL)
+    {
+        // Handle memory allocation error
+        exit(EXIT_FAILURE);
+    }
+    queue->front = NULL;
+    queue->rear = NULL;
+    queue->size = 0;
+    return queue;
+}
+
+// Function to check if the queue is empty
+bool isEmpty(Queue *queue)
+{
+    return (queue->front == NULL);
+}
+
+// Function to enqueue an element into the queue
+void enqueue(Queue *queue, int frame_number)
+{
+    QueueNode *new_node = (QueueNode *)malloc(sizeof(QueueNode));
+    if (new_node == NULL)
+    {
+        // Handle memory allocation error
+        exit(EXIT_FAILURE);
+    }
+    new_node->frame_number = frame_number;
+    new_node->next = NULL;
+    if (isEmpty(queue))
+    {
+        queue->front = new_node;
+    }
+    else
+    {
+        queue->rear->next = new_node;
+    }
+    queue->rear = new_node;
+    queue->size++;
+}
+
+// Function to dequeue an element from the queue
+int dequeue(Queue *queue)
+{
+    if (isEmpty(queue))
+    {
+        // Handle underflow error
+        exit(EXIT_FAILURE);
+    }
+    int frame_number = queue->front->frame_number;
+    QueueNode *temp = queue->front;
+    queue->front = queue->front->next;
+    free(temp);
+    queue->size--;
+    return frame_number;
+}
+
+// Function to free memory allocated for the queue
+void freeQueue(Queue *queue)
+{
+    while (!isEmpty(queue))
+    {
+        dequeue(queue);
+    }
+    free(queue);
+}
 
 void initializeMemorySystem();
 int calculateHash(int virtual_address);
@@ -114,8 +203,10 @@ int translateAddress(int virtual_address)
         }
         entry = entry->next;
     }
+    printPhysicalMemory();
 
     handlePageFault(virtual_page_number);
+    printPhysicalMemory();
     page_faults++;
     return -1;
 }
@@ -245,36 +336,33 @@ void handlePageFault(int virtual_page_number)
     allocatePage(virtual_page_number);
 }
 
+// void handlePageReplacement(int virtual_page_number)
+// {
+//     printf("Page replacement! Replacing page %d in physical memory.\n", virtual_page_number);
+//     // Implement page replacement algorithm
+//     // FIFO
+
+//     // retrieves the frame number of the oldest page in physical memory according to the FIFO policy.
+//     int frame_number = dequeue(fifo_queue);
+//     deallocatePage(frame_number);
+//     for (int i = 0; i < PAGE_SIZE; ++i)
+//     {
+//         physical_memory[frame_number * PAGE_SIZE + i] = virtual_memory[virtual_page_number * PAGE_SIZE + i];
+//     }
+//     allocatePage(virtual_page_number);
+//     enqueue(fifo_queue, frame_number);
+// }
+
 void handlePageReplacement(int virtual_page_number)
 {
-    PageTableEntry *oldest_entry = NULL;
-    int hash;
-    int oldest_frame_number = INT_MAX; // Initialize with a large value
+    // Find the oldest page using the FIFO queue
+    int oldest_frame_number = dequeue(fifo_queue);
 
-    // Traverse the page table to find the oldest page
-    for (int i = 0; i < PAGE_TABLE_SIZE; ++i)
-    {
-        PageTableEntry *entry = page_table[i];
-        while (entry != NULL)
-        {
-            if (entry->valid && entry->frames->frame_number < oldest_frame_number)
-            {
-                oldest_frame_number = entry->frames->frame_number;
-                oldest_entry = entry;
-                hash = i; // Store the hash of the oldest entry
-            }
-            entry = entry->next;
-        }
-    }
+    // Deallocate the oldest page
+    deallocatePage(oldest_frame_number);
 
-    if (oldest_entry != NULL)
-    {
-        // Deallocate the oldest page
-        deallocatePage(oldest_entry->frames->frame_number);
-
-        // Allocate the new page in physical memory
-        allocatePage(virtual_page_number);
-    }
+    // Allocate the new page in physical memory
+    allocatePage(virtual_page_number);
 }
 
 void simulateMemoryAccess()
@@ -335,16 +423,17 @@ void displayVirtualMemory()
 
 int main()
 {
+    Queue *fifo_queue = createQueue(PHYSICAL_MEMORY_SIZE / PAGE_SIZE);
     initializeMemorySystem();
 
     // Simulate processes accessing memory
-    for (int i = 0; i < 20; ++i)
+    for (int i = 0; i < 2000; ++i)
     {
         simulateMemoryAccess();
     }
-    displayVirtualMemory();
+    // displayVirtualMemory();
 
-    printPhysicalMemory();
+    // printPhysicalMemory();
 
     // Display memory statistics
     displayMemoryStatistics();
