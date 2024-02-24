@@ -7,7 +7,7 @@
 #define VIRTUAL_MEMORY_SIZE 1024
 #define PHYSICAL_MEMORY_SIZE 256
 #define PAGE_SIZE 4
-#define PAGE_TABLE_SIZE 1024
+#define PAGE_TABLE_SIZE VIRTUAL_MEMORY_SIZE / PAGE_SIZE
 
 typedef struct FrameNode
 {
@@ -338,7 +338,7 @@ int main()
     initializeMemorySystem();
 
     // Simulate processes accessing memory
-    for (int i = 0; i < 2000; ++i)
+    for (int i = 0; i < 20; ++i)
     {
         simulateMemoryAccess();
     }
