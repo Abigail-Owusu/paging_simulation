@@ -9,12 +9,18 @@ typedef struct
 {
     int frame_number; // Stores the frame number in physical memory
     int valid;        // Valid bit indicates whether a frame is present in physical memory
+    int arrival_time; // Arrival time of the page in physical memory- used in page replacement algorithms(FIFO)
 } PageTableEntry;
 
 unsigned char VIRTUAL_MEMORY[VIRTUAL_MEMORY_SIZE];
 unsigned char PHYSICAL_MEMORY[PHYSICAL_MEMORY_SIZE];
+
 PageTableEntry *PAGE_TABLE;
 int page_table_size = VIRTUAL_MEMORY_SIZE / PAGE_SIZE;
+
+// Statistics tracking variables
+int page_faults = 0;
+int hits = 0;
 
 void initializePageTable()
 {
@@ -93,9 +99,45 @@ int translateAddress(int virtualAddress){
     if (PAGE_TABLE[virtual_page_number].valid){
         int frame_number = PAGE_TABLE[virtual_page_number].frame_number;
         int offset = virtualAddress % PAGE_SIZE;
-        int physical_address = frame_number *  PAGE_SIZE * 
+        int physical_address = frame_number *  PAGE_SIZE + offset; 
 
 
+    } else{
+        //occurance of page fault
+        printf("Page fault occured for virtual address %d\n", virtualAddress);
+        page_faults++;
+        /* Allocating a frame in physical memory
+        //since there is a page fault, we need to allocate a framwe
+        //in physical memory and update the page table
+        //we would iterate through the physical memory to find a free frame
+        and allocate it to the virtual page number
+        */
+        
+        for (int i = 0; i< PHYSICAL_MEMORY_SIZE / PAGE_SIZE; i++){
+            if (PHYSICAL_MEMORY[i] == 0){
+                PHYSICAL_MEMORY[i] = 1;
+                PAGE_TABLE[virtual_page_number].valid = 1;
+                PAGE_TABLE[virtual_page_number].frame_number = i;
+                int offset = virtualAddress % PAGE_SIZE;
+                int physical_address = i * PAGE_SIZE + offset;
+                return physical_address;
+            }
+        }
+
+        /*
+        if there are no free frames in physical memory, we would have to use a page replacement algorithm
+        to replace a page in physical memory with the new page. since FIFO is the simplest, we would use it
+        */
+        int frame_to__replace = page_faults % (PHYSICAL_MEMORY_SIZE / PAGE_SIZE);
+        int offset = virtualAddress % PAGE_SIZE;
+        int physical_address = frame_to__replace * PAGE_SIZE + offset;
+        PAGE_TABLE[virtual_page_number].frame_number = frame_to__replace;
+        return physical_address;
+
+        
+
+
+        
     }
 }
 
