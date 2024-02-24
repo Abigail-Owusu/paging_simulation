@@ -2,41 +2,44 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <time.h>
+#include <limits.h>
 
-// Constants
-#define VIRTUAL_MEMORY_SIZE 1024 // Total size of virtual memory in bytes
-#define PHYSICAL_MEMORY_SIZE 256 // Total size of physical memory in bytes
-#define PAGE_SIZE 4              // Size of each page in bytes
 
-// Data structures
-typedef struct
+#define VIRTUAL_MEMORY_SIZE 1024
+#define PHYSICAL_MEMORY_SIZE 256
+#define PAGE_SIZE 4
+#define PAGE_TABLE_SIZE 1024
+
+typedef struct FrameNode
 {
-    int frame_number; // Frame number in physical memory
-    bool valid;       // Valid bit to indicate if the page is in physical memory
-    int arrival_time; // Timestamp of page arrival (for FIFO)
+    int frame_number;
+    struct FrameNode *next;
+} FrameNode;
+
+typedef struct PageTableEntry
+{
+    FrameNode *frames;
+    bool valid;
+    struct PageTableEntry *next;
 } PageTableEntry;
 
 typedef struct
 {
-    bool allocated; // Indicates whether the frame is allocated
+    bool allocated;
 } Frame;
 
-// Global variables
 unsigned char virtual_memory[VIRTUAL_MEMORY_SIZE];
-unsigned char virtual_storage[VIRTUAL_MEMORY_SIZE]; // Represents virtual memory contents
+unsigned char virtual_storage[VIRTUAL_MEMORY_SIZE];
 unsigned char physical_memory[PHYSICAL_MEMORY_SIZE];
-PageTableEntry *page_table;
+PageTableEntry *page_table[PAGE_TABLE_SIZE];
 Frame *frames;
-int num_pages;
 int num_frames;
-int fifo_queue_size = 0; // Size of the FIFO queue for page replacement
-
-// Statistics variables
+int fifo_queue_size = 0;
 int page_faults = 0;
 int hits = 0;
 
-//Function declarations
 void initializeMemorySystem();
+int calculateHash(int virtual_address);
 int translateAddress(int virtual_address);
 void allocatePage(int virtual_page_number);
 void deallocatePage(int virtual_page_number);
@@ -47,145 +50,213 @@ void displayMemoryStatistics();
 void freeMemory();
 
 
-// Function to initialize the memory management system
-void initializeMemorySystem(){
-    // Calculate the number of pages and frames
-    num_pages = VIRTUAL_MEMORY_SIZE / PAGE_SIZE;
+void initializeMemorySystem()
+{
     num_frames = PHYSICAL_MEMORY_SIZE / PAGE_SIZE;
-
-    // Initialize page table
-    page_table = (PageTableEntry *)malloc(num_pages * sizeof(PageTableEntry));
-    if (page_table == NULL)
-    {
-        fprintf(stderr, "Memory allocation failed for page table.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Initialize frames
     frames = (Frame *)malloc(num_frames * sizeof(Frame));
-    if (frames == NULL){
+    if (frames == NULL)
+    {
         fprintf(stderr, "Memory allocation failed for frames.\n");
-        free(page_table);
         exit(EXIT_FAILURE);
     }
-
-    // Initialize page table and frames
-    for (int i = 0; i < num_pages; ++i){
-        page_table[i].valid = false;
-    }
-
-    for (int i = 0; i < num_frames; ++i){
+    for (int i = 0; i < num_frames; ++i)
+    {
         frames[i].allocated = false;
     }
 
-    // Initialize virtual memory and virtual storage
-    for (int i = 0; i < VIRTUAL_MEMORY_SIZE; ++i){
-        virtual_memory[i] = rand() % 256; // Initialize with random data
+    for (int i = 0; i < VIRTUAL_MEMORY_SIZE; ++i)
+    {
+        virtual_memory[i] = rand() % 256;
         virtual_storage[i] = virtual_memory[i];
     }
 
-    // Seed for random number generation
     srand(time(NULL));
 }
 
-// Function for address translation from virtual to physical addresses
-int translateAddress(int virtual_address){
+int calculateHash(int virtual_address)
+{
+    return virtual_address % PAGE_TABLE_SIZE;
+}
+
+bool frameExists(FrameNode *frames, int virtual_page_number)
+{
+    FrameNode *current_frame = frames;
+    while (current_frame != NULL)
+    {
+        if (current_frame->frame_number == virtual_page_number)
+        {
+            return true;
+        }
+        current_frame = current_frame->next;
+    }
+    return false;
+}
+int translateAddress(int virtual_address)
+{
     int virtual_page_number = virtual_address / PAGE_SIZE;
     int offset = virtual_address % PAGE_SIZE;
 
-    if (virtual_page_number >= num_pages || !page_table[virtual_page_number].valid){
-        // Page fault
-        handlePageFault(virtual_page_number);
-        page_faults++;
-    }
-    else
+    int hash = calculateHash(virtual_page_number);
+    PageTableEntry *entry = page_table[hash];
+    while (entry != NULL)
     {
-        // Page is in physical memory (hit)
-        hits++;
-    }
-
-    int physical_frame_number = page_table[virtual_page_number].frame_number;
-    int physical_address = physical_frame_number * PAGE_SIZE + offset;
-    return physical_address;
-}
-
-// Function for page allocation (simulating memory requests)
-void allocatePage(int virtual_page_number){
-    // Check if the page is already in physical memory
-    if (!page_table[virtual_page_number].valid){
-        // Find a free frame
-        for (int i = 0; i < num_frames; ++i){
-            if (!frames[i].allocated){
-                // Allocate the frame
-                page_table[virtual_page_number].frame_number = i;
-                page_table[virtual_page_number].valid = true;
-                frames[i].allocated = true;
-
-                // Enqueue the frame in the FIFO queue
-                page_table[virtual_page_number].arrival_time = fifo_queue_size;
-                fifo_queue_size++;
-
-                return;
+        if (entry->valid)
+        {
+            FrameNode *current_frame = entry->frames;
+            while (current_frame != NULL)
+            {
+                if (current_frame->frame_number == virtual_page_number)
+                {
+                    hits++;
+                    return current_frame->frame_number * PAGE_SIZE + offset;
+                }
+                current_frame = current_frame->next;
             }
         }
-
-        // Handle page replacement using FIFO
-        handlePageReplacement(virtual_page_number);
+        entry = entry->next;
     }
+
+    handlePageFault(virtual_page_number);
+    page_faults++;
+    return -1;
 }
 
-// Function for page deallocation
-void deallocatePage(int virtual_page_number){
-    if (page_table[virtual_page_number].valid)
+void allocatePage(int virtual_page_number)
+{
+    int hash = calculateHash(virtual_page_number);
+    PageTableEntry *entry = page_table[hash];
+    while (entry != NULL)
     {
-        // Free the corresponding frame
-        int frame_number = page_table[virtual_page_number].frame_number;
-        frames[frame_number].allocated = false;
-        page_table[virtual_page_number].valid = false;
-    }
-}
-
-// Function for handling page faults (simulating fetching the required page from secondary storage)
-void handlePageFault(int virtual_page_number){
-    // Simulate fetching the required page from secondary storage (virtual memory)
-    printf("Page fault! Fetching page %d from secondary storage.\n", virtual_page_number);
-    for (int i = 0; i < PAGE_SIZE; ++i){
-        virtual_memory[virtual_page_number * PAGE_SIZE + i] = virtual_storage[virtual_page_number * PAGE_SIZE + i];
-    }
-
-    // Allocate the page in physical memory
-    allocatePage(virtual_page_number);
-}
-
-// Function for handling page replacement using FIFO
-void handlePageReplacement(int virtual_page_number){
-    // Find the oldest page in the FIFO queue
-    int oldest_page_index = 0;
-    for (int i = 1; i < num_pages; ++i)
-    {
-        if (page_table[i].arrival_time < page_table[oldest_page_index].arrival_time)
+        if (entry->valid && frameExists(entry->frames, virtual_page_number))
         {
-            oldest_page_index = i;
+            return;
+        }
+        entry = entry->next;
+    }
+
+    for (int i = 0; i < num_frames; ++i)
+    {
+        if (!frames[i].allocated)
+        {
+            frames[i].allocated = true;
+            FrameNode *new_frame = (FrameNode *)malloc(sizeof(FrameNode));
+            if (new_frame == NULL)
+            {
+                fprintf(stderr, "Memory allocation failed for frame node.\n");
+                exit(EXIT_FAILURE);
+            }
+            new_frame->frame_number = virtual_page_number;
+            new_frame->next = NULL;
+            PageTableEntry *new_entry = (PageTableEntry *)malloc(sizeof(PageTableEntry));
+            if (new_entry == NULL)
+            {
+                fprintf(stderr, "Memory allocation failed for page table entry.\n");
+                exit(EXIT_FAILURE);
+            }
+            new_entry->frames = new_frame;
+            new_entry->valid = true;
+            new_entry->next = page_table[hash];
+            page_table[hash] = new_entry;
+            return;
         }
     }
 
-    // Deallocate the oldest page
-    deallocatePage(oldest_page_index);
+    handlePageReplacement(virtual_page_number);
+}
 
-    // Allocate the new page in physical memory
+void deallocatePage(int virtual_page_number)
+{
+    int hash = calculateHash(virtual_page_number);
+    PageTableEntry *entry = page_table[hash];
+    PageTableEntry *prev_entry = NULL;
+
+    while (entry != NULL)
+    {
+        if (entry->valid)
+        {
+            FrameNode *current_frame = entry->frames;
+            FrameNode *prev_frame = NULL;
+            while (current_frame != NULL)
+            {
+                if (current_frame->frame_number == virtual_page_number)
+                {
+                    current_frame->frame_number = false;
+                    free(current_frame);
+                    if (prev_frame != NULL)
+                    {
+                        prev_frame->next = current_frame->next;
+                    }
+                    else
+                    {
+                        entry->frames = current_frame->next;
+                    }
+                    if (entry->frames == NULL)
+                    {
+                        entry->valid = false;
+                    }
+                    return;
+                }
+                prev_frame = current_frame;
+                current_frame = current_frame->next;
+            }
+        }
+        prev_entry = entry;
+        entry = entry->next;
+    }
+}
+
+void handlePageFault(int virtual_page_number)
+{
+    printf("Page fault! Fetching page %d from secondary storage.\n", virtual_page_number);
+    for (int i = 0; i < PAGE_SIZE; ++i)
+    {
+        virtual_memory[virtual_page_number * PAGE_SIZE + i] = virtual_storage[virtual_page_number * PAGE_SIZE + i];
+    }
     allocatePage(virtual_page_number);
 }
 
-// Function to simulate processes accessing memory by generating random memory addresses
+void handlePageReplacement(int virtual_page_number)
+{
+    PageTableEntry *oldest_entry = NULL;
+    int hash, oldest_frame_number = INT_MAX;
+
+    for (int i = 0; i < PAGE_TABLE_SIZE; ++i)
+    {
+        PageTableEntry *entry = page_table[i];
+        while (entry != NULL)
+        {
+            if (entry->valid && entry->frames->frame_number < oldest_frame_number)
+            {
+                oldest_frame_number = entry->frames->frame_number;
+                oldest_entry = entry;
+                hash = i;
+            }
+            entry = entry->next;
+        }
+    }
+
+    if (oldest_entry != NULL)
+    {
+        deallocatePage(oldest_entry->frames->frame_number);
+        allocatePage(virtual_page_number);
+    }
+}
+
 void simulateMemoryAccess()
 {
     int virtual_address = rand() % VIRTUAL_MEMORY_SIZE;
     int physical_address = translateAddress(virtual_address);
 
-    printf("Virtual Address: %d => Physical Address: %d\n", virtual_address, physical_address);
+    if (physical_address != -1)
+    {
+        printf("Virtual Address: %d => Physical Address: %d\n", virtual_address, physical_address);
+    }
+    else
+    {
+        printf("Virtual Address: %d => Page fault occurred!\n", virtual_address);
+    }
 }
 
-// Function to display memory statistics
 void displayMemoryStatistics()
 {
     printf("\nMemory Statistics:\n");
@@ -194,10 +265,25 @@ void displayMemoryStatistics()
     printf("Hit Rate: %.2f%%\n", (hits / (float)(hits + page_faults)) * 100);
 }
 
-// Function to free allocated memory
 void freeMemory()
 {
-    free(page_table);
+    for (int i = 0; i < PAGE_TABLE_SIZE; ++i)
+    {
+        PageTableEntry *entry = page_table[i];
+        while (entry != NULL)
+        {
+            FrameNode *current_frame = entry->frames;
+            while (current_frame != NULL)
+            {
+                FrameNode *temp = current_frame;
+                current_frame = current_frame->next;
+                free(temp);
+            }
+            PageTableEntry *temp_entry = entry;
+            entry = entry->next;
+            free(temp_entry);
+        }
+    }
     free(frames);
 }
 
